@@ -1,0 +1,692 @@
+{
+  "info": {
+    "_postman_id": "b763c950-797d-56ce-9973-eb8e264a66fa",
+    "name": "ChallengeAPI - Testes Automatizados (QA)",
+    "description": "Parte B - Automação de Teste (FIAP 2TDS).\n\nTestes funcionais (status, contrato e regras dos endpoints Auth, Tutores e Pets) e não funcional (tempo de resposta em todas as requisições).\n\nExecutar em ordem pelo Collection Runner com o environment 'ChallengeAPI - Local'.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "event": [
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Teste NÃO FUNCIONAL aplicado a todas as requisições (desempenho)",
+          "// O CT00 só aquece a conexão com o banco, então fica fora da medição",
+          "if (!pm.info.requestName.startsWith('CT00')) {",
+          "    const limite = Number(pm.environment.get('tempoMaximoMs') || 2000);",
+          "    pm.test(`Desempenho - tempo de resposta < ${limite} ms`, () => {",
+          "        pm.expect(pm.response.responseTime).to.be.below(limite);",
+          "    });",
+          "}"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "0 - Pré-condição",
+      "item": [
+        {
+          "name": "CT00 - Pré-condição: API e banco Oracle disponíveis",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "let json = {}; try { json = pm.response.json(); } catch (e) {}",
+                  "pm.test('CT00 - API responde no /health (200)', () => pm.response.to.have.status(200));",
+                  "pm.test('CT00 - Banco Oracle Healthy', () => pm.expect(json.status).to.eql('Healthy'));",
+                  "// Sem banco não adianta seguir: interrompe a execução",
+                  "if (json.status !== 'Healthy') { postman.setNextRequest(null); }"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            },
+            "description": "Entrada: GET /health. Saída esperada: 200 e status Healthy. Se o Oracle estiver fora, a execução para aqui.",
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "1 - Autenticação (JWT)",
+      "item": [
+        {
+          "name": "CT01 - Login com credenciais válidas",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('CT01 - Status 200 OK', () => pm.response.to.have.status(200));",
+                  "let json = {}; try { json = pm.response.json(); } catch (e) { /* corpo não é JSON (ex.: erro 500) */ }",
+                  "pm.test('CT01 - Retorna token JWT no corpo', () => {",
+                  "    pm.expect(json).to.have.property('token');",
+                  "    pm.expect(json.token.split('.')).to.have.lengthOf(3);",
+                  "});",
+                  "// guarda o token para as próximas requisições",
+                  "if (json.token) pm.environment.set('token', json.token);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/Auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "Auth",
+                "login"
+              ]
+            },
+            "description": "Entrada: usuário admin + senha correta. Saída esperada: 200 e um JWT (3 partes separadas por ponto).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{usuarioAdmin}}\",\n  \"password\": \"{{senhaAdmin}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        },
+        {
+          "name": "CT02 - Login com senha inválida",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('CT02 - Status 401 Unauthorized', () => pm.response.to.have.status(401));",
+                  "pm.test('CT02 - Não retorna token', () => pm.expect(pm.response.text()).to.not.include('token'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/Auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "Auth",
+                "login"
+              ]
+            },
+            "description": "Entrada: senha 'senhaErrada123'. Saída esperada: 401 sem token.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{usuarioAdmin}}\",\n  \"password\": \"senhaErrada123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        },
+        {
+          "name": "CT03 - Rota protegida sem token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('CT03 - Status 401 Unauthorized', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/Auth/dados-protegidos",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "Auth",
+                "dados-protegidos"
+              ]
+            },
+            "description": "Entrada: nenhuma autenticação. Saída esperada: 401.",
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        },
+        {
+          "name": "CT04 - Rota protegida com token válido",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('CT04 - Status 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('CT04 - Mensagem identifica o usuário autenticado', () => {",
+                  "    pm.expect(pm.response.json().message).to.include(pm.environment.get('usuarioAdmin'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/Auth/dados-protegidos",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "Auth",
+                "dados-protegidos"
+              ]
+            },
+            "description": "Entrada: Bearer {{token}} obtido no CT01. Saída esperada: 200 e mensagem 'Olá admin! Você está autenticado.'",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "2 - Tutores",
+      "item": [
+        {
+          "name": "CT05 - Cadastrar tutor válido",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('CT05 - Status 201 Created', () => pm.response.to.have.status(201));",
+                  "let json = {}; try { json = pm.response.json(); } catch (e) { /* corpo não é JSON (ex.: erro 500) */ }",
+                  "pm.test('CT05 - Gera ID numérico', () => pm.expect(json.id).to.be.a('number').and.above(0));",
+                  "pm.test('CT05 - Dados retornados iguais aos enviados', () => {",
+                  "    pm.expect(json.nome).to.eql('Tutor QA Automacao');",
+                  "    pm.expect(json.telefone).to.eql('11999990000');",
+                  "    pm.expect(json.email).to.eql('tutor.qa@petcare.com');",
+                  "});",
+                  "pm.test('CT05 - Header Location aponta para o recurso criado', () => {",
+                  "    pm.expect(pm.response.headers.get('Location')).to.include('/api/Tutores/' + json.id);",
+                  "});",
+                  "if (json.id) pm.environment.set('tutorId', json.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/Tutores",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "Tutores"
+              ]
+            },
+            "description": "Entrada: nome/telefone/email fixos. Saída esperada: 201, id gerado e mesmos dados.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nome\": \"Tutor QA Automacao\",\n  \"telefone\": \"11999990000\",\n  \"email\": \"tutor.qa@petcare.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        },
+        {
+          "name": "CT06 - Cadastrar tutor sem campos obrigatórios",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('CT06 - Status 400 Bad Request', () => pm.response.to.have.status(400));",
+                  "let json = {}; try { json = pm.response.json(); } catch (e) { /* corpo não é JSON (ex.: erro 500) */ }",
+                  "pm.test('CT06 - Aponta os campos obrigatórios ausentes', () => {",
+                  "    const campos = Object.keys(json.errors).map(c => c.toLowerCase());",
+                  "    pm.expect(campos).to.include('nome');",
+                  "    pm.expect(campos).to.include('email');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/Tutores",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "Tutores"
+              ]
+            },
+            "description": "Entrada: só telefone (sem nome e email). Saída esperada: 400 com erros de validação em Nome e Email.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"telefone\": \"11999990000\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "3 - Pets (CRUD completo)",
+      "item": [
+        {
+          "name": "CT07 - Cadastrar pet vinculado ao tutor",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('CT07 - Status 201 Created', () => pm.response.to.have.status(201));",
+                  "let json = {}; try { json = pm.response.json(); } catch (e) { /* corpo não é JSON (ex.: erro 500) */ }",
+                  "pm.test('CT07 - Pet criado com os dados enviados', () => {",
+                  "    pm.expect(json.id).to.be.a('number').and.above(0);",
+                  "    pm.expect(json.nome).to.eql('Thor');",
+                  "    pm.expect(json.especie).to.eql('Cachorro');",
+                  "    pm.expect(json.idade).to.eql(3);",
+                  "    pm.expect(json.tutorId).to.eql(Number(pm.environment.get('tutorId')));",
+                  "});",
+                  "if (json.id) pm.environment.set('petId', json.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/Pets",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "Pets"
+              ]
+            },
+            "description": "Entrada: Thor / Cachorro / Labrador / 3 anos / tutorId do CT05. Saída esperada: 201 e id do pet.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nome\": \"Thor\",\n  \"especie\": \"Cachorro\",\n  \"raca\": \"Labrador\",\n  \"idade\": 3,\n  \"tutorId\": {{tutorId}},\n  \"clinicaId\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        },
+        {
+          "name": "CT08 - Buscar pet por ID",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('CT08 - Status 200 OK', () => pm.response.to.have.status(200));",
+                  "let json = {}; try { json = pm.response.json(); } catch (e) { /* corpo não é JSON (ex.: erro 500) */ }",
+                  "pm.test('CT08 - Retorna o pet correto', () => {",
+                  "    pm.expect(json.id).to.eql(Number(pm.environment.get('petId')));",
+                  "    pm.expect(json.nome).to.eql('Thor');",
+                  "    pm.expect(json.raca).to.eql('Labrador');",
+                  "});",
+                  "pm.test('CT08 - Resposta em JSON', () => pm.response.to.be.json);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/Pets/{{petId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "Pets",
+                "{{petId}}"
+              ]
+            },
+            "description": "Entrada: petId do CT07. Saída esperada: 200 com nome Thor e raça Labrador.",
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        },
+        {
+          "name": "CT09 - Atualizar pet com ID divergente",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('CT09 - Status 400 Bad Request (ID da URL ≠ ID do corpo)', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/Pets/{{petId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "Pets",
+                "{{petId}}"
+              ]
+            },
+            "description": "Entrada: URL com petId e corpo com id 999999. Saída esperada: 400.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": 999999,\n  \"nome\": \"Thor\",\n  \"especie\": \"Cachorro\",\n  \"raca\": \"Labrador\",\n  \"idade\": 4,\n  \"tutorId\": {{tutorId}},\n  \"clinicaId\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        },
+        {
+          "name": "CT10 - Atualizar idade do pet",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('CT10 - Status 204 No Content', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/Pets/{{petId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "Pets",
+                "{{petId}}"
+              ]
+            },
+            "description": "Entrada: mesmo pet com idade 4. Saída esperada: 204.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": {{petId}},\n  \"nome\": \"Thor\",\n  \"especie\": \"Cachorro\",\n  \"raca\": \"Labrador\",\n  \"idade\": 4,\n  \"tutorId\": {{tutorId}},\n  \"clinicaId\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        },
+        {
+          "name": "CT11 - Conferir atualização persistida",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('CT11 - Status 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('CT11 - Idade foi atualizada para 4', () => pm.expect(pm.response.json().idade).to.eql(4));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/Pets/{{petId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "Pets",
+                "{{petId}}"
+              ]
+            },
+            "description": "Entrada: petId. Saída esperada: 200 e idade = 4.",
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        },
+        {
+          "name": "CT12 - Excluir pet",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('CT12 - Status 204 No Content', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/Pets/{{petId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "Pets",
+                "{{petId}}"
+              ]
+            },
+            "description": "Entrada: petId. Saída esperada: 204.",
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        },
+        {
+          "name": "CT13 - Buscar pet excluído",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('CT13 - Status 404 Not Found', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/Pets/{{petId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "Pets",
+                "{{petId}}"
+              ]
+            },
+            "description": "Entrada: petId já excluído. Saída esperada: 404.",
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        },
+        {
+          "name": "CT14 - Excluir tutor (limpeza da massa de teste)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('CT14 - Status 204 No Content', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/Tutores/{{tutorId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "Tutores",
+                "{{tutorId}}"
+              ]
+            },
+            "description": "Entrada: tutorId do CT05. Saída esperada: 204 (deixa o banco como estava).",
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
